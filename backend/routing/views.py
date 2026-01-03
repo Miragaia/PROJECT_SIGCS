@@ -194,9 +194,20 @@ def calculate_route(request):
                     'message': 'Could not find a valid route using the selected transport mode. The points may not be connected in the network or may be too far apart.'
                 }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
             
-            # Calculate total distance and duration
+            # Calculate total distance
             total_distance_km = sum(r[6] for r in routes_found if r[6])  # km from table
-            total_time_minutes = sum(r[3] for r in routes_found)  # adjusted cost
+            
+            # Calculate duration based on distance and mode speed
+            # Standard transport mode speeds in km/h
+            speed_kmh = {
+                'walk': 5,      # 5 km/h
+                'bike': 15,     # 15 km/h
+                'car': 40       # 40 km/h
+            }
+            
+            speed = speed_kmh.get(mode, 5)
+            # time = distance / speed (in hours), convert to minutes
+            total_time_minutes = (total_distance_km / speed) * 60 if total_distance_km > 0 else 0
             
             # Format response
             route_data = {
