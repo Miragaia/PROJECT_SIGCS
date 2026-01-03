@@ -164,7 +164,7 @@ def calculate_route(request):
                             r.edge,
                             r.cost,
                             rv.osm_name,
-                            ST_AsGeoJSON(rv.geom) as geometry,
+                            ST_AsGeoJSON(ST_Transform(rv.geom, 4326)) as geometry,
                             rv.km
                         FROM pgr_dijkstra(
                             'SELECT id_0 as id, source, target, 
