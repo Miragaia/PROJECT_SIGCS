@@ -84,13 +84,18 @@ export default function RouteControls({
         )}
 
         {/* Route Results */}
-        {routeDistance && routeDuration && (
+        {(routeDistance !== null && routeDistance !== undefined) && 
+         (routeDuration !== null && routeDuration !== undefined) && (
           <div className="mt-3 p-2 bg-green-50 rounded border border-green-200">
             <p className="text-xs text-gray-700">
               <strong>Distance:</strong> {routeDistance.toFixed(2)} km
             </p>
             <p className="text-xs text-gray-700">
-              <strong>Duration:</strong> {routeDuration.toFixed(1)} min ({selectedMode})
+              <strong>Duration:</strong> {
+                routeDuration < 1 
+                  ? `${Math.round(routeDuration * 60)} sec` 
+                  : `${routeDuration.toFixed(1)} min`
+              } ({selectedMode})
             </p>
           </div>
         )}

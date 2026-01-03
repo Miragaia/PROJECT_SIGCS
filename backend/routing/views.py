@@ -111,55 +111,92 @@ def calculate_route(request):
     
     try:
         with connection.cursor() as cursor:
-            # Find nearest vertices to origin and destination
-            cursor.execute("""
-                SELECT id FROM rede_viaria_av_vertices_pgr
-                ORDER BY the_geom <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
-                LIMIT 1
-            """, [origin_lng, origin_lat])
-            origin_vertex = cursor.fetchone()[0]
-            
-            cursor.execute("""
-                SELECT id FROM rede_viaria_av_vertices_pgr
-                ORDER BY the_geom <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
-                LIMIT 1
-            """, [dest_lng, dest_lat])
-            dest_vertex = cursor.fetchone()[0]
-            
-            # Calculate route using pgr_dijkstra, filtering by transport mode
-            # Only include edges where the cost column is NOT NULL (road allows this mode)
+            # Find nearest EDGE (road segment) for origin, considering transport mode
+            # Get both source and target vertices to try both ends of the road
             cursor.execute(f"""
-                SELECT 
-                    r.seq,
-                    r.node,
-                    r.edge,
-                    r.cost,
-                    rv.osm_name,
-                    ST_AsGeoJSON(rv.geom) as geometry,
-                    rv.km
-                FROM pgr_dijkstra(
-                    'SELECT id_0 as id, source, target, 
-                            {cost_field} as cost, 
-                            {cost_field} as reverse_cost 
-                     FROM rede_viaria_v3 
-                     WHERE {cost_field} IS NOT NULL',
-                    %s, %s, directed := false
-                ) r
-                LEFT JOIN rede_viaria_v3 rv ON r.edge = rv.id_0
-                WHERE r.edge IS NOT NULL
-            """, [origin_vertex, dest_vertex])
+                SELECT source, target, 
+                       ST_Distance(ST_Transform(geom, 4326), ST_SetSRID(ST_MakePoint(%s, %s), 4326)) as dist
+                FROM rede_viaria_v3
+                WHERE {cost_field} IS NOT NULL
+                ORDER BY ST_Transform(geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                LIMIT 1
+            """, [origin_lng, origin_lat, origin_lng, origin_lat])
+            origin_edge = cursor.fetchone()
+            if not origin_edge:
+                return Response({
+                    'error': 'No valid road found near origin point',
+                    'message': f'Could not find a {mode}-accessible road near the starting point.'
+                }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
             
-            routes = cursor.fetchall()
+            origin_source, origin_target = origin_edge[0], origin_edge[1]
             
-            if not routes:
+            # Find nearest EDGE for destination
+            cursor.execute(f"""
+                SELECT source, target,
+                       ST_Distance(ST_Transform(geom, 4326), ST_SetSRID(ST_MakePoint(%s, %s), 4326)) as dist
+                FROM rede_viaria_v3
+                WHERE {cost_field} IS NOT NULL
+                ORDER BY ST_Transform(geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                LIMIT 1
+            """, [dest_lng, dest_lat, dest_lng, dest_lat])
+            dest_edge = cursor.fetchone()
+            if not dest_edge:
+                return Response({
+                    'error': 'No valid road found near destination point',
+                    'message': f'Could not find a {mode}-accessible road near the destination.'
+                }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            
+            dest_source, dest_target = dest_edge[0], dest_edge[1]
+            
+            # Try all combinations of source/target vertices to find a valid route
+            # This handles cases where one end of the edge is better connected
+            routes_found = None
+            best_vertices = None
+            
+            for origin_vertex in [origin_source, origin_target]:
+                for dest_vertex in [dest_source, dest_target]:
+                    # Calculate route using pgr_dijkstra, filtering by transport mode
+                    # Only include edges where the cost column is NOT NULL (road allows this mode)
+                    cursor.execute(f"""
+                        SELECT 
+                            r.seq,
+                            r.node,
+                            r.edge,
+                            r.cost,
+                            rv.osm_name,
+                            ST_AsGeoJSON(rv.geom) as geometry,
+                            rv.km
+                        FROM pgr_dijkstra(
+                            'SELECT id_0 as id, source, target, 
+                                    {cost_field} as cost, 
+                                    {cost_field} as reverse_cost 
+                             FROM rede_viaria_v3 
+                             WHERE {cost_field} IS NOT NULL',
+                            %s, %s, directed := false
+                        ) r
+                        LEFT JOIN rede_viaria_v3 rv ON r.edge = rv.id_0
+                        WHERE r.edge IS NOT NULL
+                    """, [origin_vertex, dest_vertex])
+                    
+                    temp_routes = cursor.fetchall()
+                    
+                    if temp_routes:
+                        routes_found = temp_routes
+                        best_vertices = (origin_vertex, dest_vertex)
+                        break
+                
+                if routes_found:
+                    break
+            
+            if not routes_found:
                 return Response({
                     'error': 'No route found between the specified points',
                     'message': 'Could not find a valid route using the selected transport mode. The points may not be connected in the network or may be too far apart.'
                 }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
             
             # Calculate total distance and duration
-            total_distance_km = sum(r[6] for r in routes if r[6])  # km from table
-            total_time_minutes = sum(r[3] for r in routes)  # adjusted cost
+            total_distance_km = sum(r[6] for r in routes_found if r[6])  # km from table
+            total_time_minutes = sum(r[3] for r in routes_found)  # adjusted cost
             
             # Format response
             route_data = {
@@ -174,7 +211,7 @@ def calculate_route(request):
                 }
             }
             
-            for route in routes:
+            for route in routes_found:
                 if route[5]:  # geometry
                     route_data['features'].append({
                         'type': 'Feature',

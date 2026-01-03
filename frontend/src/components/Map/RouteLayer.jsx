@@ -7,12 +7,31 @@ export default function RouteLayer({ route, origin, destination }) {
     return null;
   }
 
-  // Get the route line if available
-  const routeFeature = route?.features?.find(f => f.geometry?.type === 'LineString');
-  const coordinates = routeFeature?.geometry?.coordinates || [];
+  // Get all route segments and combine their coordinates
+  // Backend returns MultiLineString geometries
+  const allCoords = [];
   
-  // Convert GeoJSON coordinates [lng, lat] to Leaflet [lat, lng]
-  const pathCoords = coordinates.map(([lng, lat]) => [lat, lng]);
+  if (route && route.features) {
+    route.features.forEach(feature => {
+      if (feature.geometry) {
+        const geomType = feature.geometry.type;
+        const coords = feature.geometry.coordinates;
+        
+        if (geomType === 'LineString') {
+          // LineString: array of [lng, lat] points
+          allCoords.push(...coords);
+        } else if (geomType === 'MultiLineString') {
+          // MultiLineString: array of arrays of [lng, lat] points
+          coords.forEach(lineString => {
+            allCoords.push(...lineString);
+          });
+        }
+      }
+    });
+  }
+  
+  // Convert GeoJSON coordinates [lng, lat, elevation?] to Leaflet [lat, lng]
+  const pathCoords = allCoords.map(coord => [coord[1], coord[0]]);
 
   return (
     <>

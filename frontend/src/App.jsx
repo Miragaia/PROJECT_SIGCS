@@ -144,9 +144,16 @@ function App() {
   const calculateRoute = async () => {
     if (!origin || !destination) return;
 
+    console.log('Calculating route:', {
+      origin,
+      destination,
+      mode: selectedMode
+    });
+
     try {
       setLoadingRoute(true);
       const response = await routingService.calculateRoute(origin, destination, selectedMode);
+      console.log('Route response:', response);
       setRoute(response);
       
       // Extract distance and duration from response
@@ -158,6 +165,10 @@ function App() {
       }
     } catch (err) {
       console.error('Failed to calculate route:', err);
+      console.error('Error details:', {
+        status: err.response?.status,
+        data: err.response?.data
+      });
       
       // Show user-friendly error message
       const errorMsg = err.response?.data?.message || 
