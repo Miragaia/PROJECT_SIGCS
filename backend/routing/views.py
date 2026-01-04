@@ -320,44 +320,107 @@ def generate_isochrone(request):
     mode = data['mode']
     minutes_list = data['minutes']
     
-    # Map mode to cost field and function
-    if mode == 'walk':
-        function_name = 'mk_isochrone_walk'
-    elif mode == 'bike':
-        function_name = 'mk_isochrone_bike'
-    else:
-        return Response({
-            'error': 'Isochrone generation for car mode not yet implemented'
-        }, status=status.HTTP_501_NOT_IMPLEMENTED)
+    # Map mode to cost field (minutes) on the edges
+    cost_mapping = {
+        'walk': 'cost_walk',
+        'bike': 'cost_bike',
+        'car': 'cost'
+    }
+    cost_field = cost_mapping.get(mode)
+    if not cost_field:
+        return Response({'error': 'Invalid mode'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
         isochrones = []
-        
+        print(f"[ISOCHRONE DEBUG] Generating isochrones for origin ({origin_lat}, {origin_lng}) mode={mode} minutes={minutes_list}")
+
         with connection.cursor() as cursor:
+            # Snap origin to nearest edge and pick the closest endpoint as start vertex
+            cursor.execute(f"""
+                SELECT 
+                    source, target,
+                    ST_AsGeoJSON(ST_Transform(ST_ClosestPoint(geom, ST_Transform(ST_SetSRID(ST_MakePoint(%s, %s), 4326), 3763)), 4326)) as projected_point
+                FROM rede_viaria_v3
+                WHERE {cost_field} IS NOT NULL
+                ORDER BY ST_Transform(geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                LIMIT 1
+            """, [origin_lng, origin_lat, origin_lng, origin_lat])
+
+            snap_row = cursor.fetchone()
+            if not snap_row:
+                print(f"[ISOCHRONE DEBUG] ERROR: No road found near origin")
+                return Response({'error': 'No valid road near origin'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+            src, tgt, proj_json = snap_row
+            
+            if not proj_json:
+                print(f"[ISOCHRONE DEBUG] ERROR: Could not project point onto geometry")
+                return Response({'error': 'Could not snap to road'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            
+            proj = eval(proj_json)
+            proj_xy = proj['coordinates']
+            
+            # Simply use source vertex (pgr_drivingDistance works from any vertex)
+            start_vertex = src
+            print(f"[ISOCHRONE DEBUG] Snapped to vertex {start_vertex} (source={src}, target={tgt})")
+
             for minutes in minutes_list:
+                print(f"[ISOCHRONE DEBUG] Processing {minutes} minutes...")
+                # pgr_drivingDistance returns reachable edges within the cutoff (minutes)
                 cursor.execute(f"""
-                    SELECT ST_AsGeoJSON({function_name}(%s, %s, %s))
-                """, [origin_lng, origin_lat, minutes])
-                
+                    WITH dd AS (
+                        SELECT edge
+                        FROM pgr_drivingDistance(
+                            'SELECT id_0 as id, source, target, {cost_field} as cost, {cost_field} as reverse_cost FROM rede_viaria_v3 WHERE {cost_field} IS NOT NULL',
+                            %s, %s, false
+                        )
+                    ), geomset AS (
+                        SELECT ST_Collect(ST_Force2D(ST_Transform(rv.geom, 4326))) AS g, COUNT(*) AS cnt
+                        FROM rede_viaria_v3 rv
+                        WHERE rv.id_0 IN (SELECT edge FROM dd)
+                    )
+                    SELECT ST_AsGeoJSON(
+                        CASE
+                            WHEN cnt = 0 THEN NULL
+                            WHEN cnt = 1 THEN ST_Buffer(g::geography, %s)::geometry  -- buffer single segment by minutes (meters ~ minutes*60)
+                            WHEN cnt = 2 THEN ST_Buffer(ST_ConvexHull(g), 0.0003)   -- small buffer for two segments
+                            ELSE ST_ConcaveHull(g, 0.9)
+                        END
+                    ) AS geom
+                    FROM geomset
+                """, [start_vertex, minutes, minutes * 60])
+
                 result = cursor.fetchone()
+                print(f"[ISOCHRONE DEBUG] Query result for {minutes}min: {result}")
                 if result and result[0]:
+                    iso_geom = eval(result[0])
+                    print(f"[ISOCHRONE DEBUG] Parsed geometry for {minutes}min: {iso_geom.get('type') if isinstance(iso_geom, dict) else 'invalid'}")
                     isochrones.append({
                         'type': 'Feature',
                         'properties': {
                             'minutes': minutes,
                             'mode': mode
                         },
-                        'geometry': eval(result[0])
+                        'geometry': iso_geom
                     })
-        
+                else:
+                    print(f"[ISOCHRONE DEBUG] No geometry returned for {minutes}min")
+
+        print(f"[ISOCHRONE DEBUG] Total isochrones generated: {len(isochrones)}")
         return Response({
             'type': 'FeatureCollection',
             'features': isochrones
         })
-    
+
     except Exception as e:
+        import traceback
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        print(f"[ISOCHRONE ERROR] {error_msg}")
+        print(f"[ISOCHRONE ERROR] Traceback:\n{error_trace}")
         return Response({
-            'error': str(e)
+            'error': error_msg,
+            'details': error_trace
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

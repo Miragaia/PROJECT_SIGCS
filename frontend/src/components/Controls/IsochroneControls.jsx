@@ -6,7 +6,7 @@ export default function IsochroneControls({
   onMinutesChange,
   isLoading,
 }) {
-  const timeOptions = [10, 20, 30];
+  const timeOptions = [5, 10, 15, 20, 25, 30];
 
   return (
     <div className="absolute bottom-4 left-4 z-10 bg-white rounded-lg shadow-lg p-4 max-w-xs">

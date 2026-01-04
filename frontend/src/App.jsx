@@ -94,20 +94,30 @@ function App() {
     const generateIsochrones = async () => {
       try {
         setLoadingIsochrones(true);
+        // Use clicked origin as center if set; otherwise fallback to map center
+        const centerPoint = origin
+          ? { lat: origin.lat, lng: origin.lng }
+          : { lat: mapCenter[0], lng: mapCenter[1] };
+
+        console.log('[ISOCHRONE] Requesting:', { centerPoint, mode: selectedMode, minutes: selectedMinutes });
+        
         const response = await routingService.generateIsochrone(
-          {
-            lat: mapCenter[0],
-            lng: mapCenter[1],
-          },
+          centerPoint,
           selectedMode,
           selectedMinutes
         );
         
+        console.log('[ISOCHRONE] Response received:', response);
+        
         // Convert response to array of GeoJSON features if it's a FeatureCollection
         if (response.features) {
+          console.log('[ISOCHRONE] Setting isochrones from features:', response.features.length, 'features');
           setIsochrones(response.features);
         } else if (Array.isArray(response)) {
+          console.log('[ISOCHRONE] Setting isochrones from array:', response.length, 'items');
           setIsochrones(response);
+        } else {
+          console.warn('[ISOCHRONE] Unexpected response format');
         }
       } catch (err) {
         console.error('Failed to generate isochrones:', err);
