@@ -81,38 +81,62 @@ class PoisAveiro(models.Model):
 
 class IsoWalkRings(models.Model):
     """
-    Walking isochrone rings.
+    Walking isochrone rings - precomputed and stored.
     """
-    band = models.CharField(max_length=50, null=True, blank=True)
-    geom = models.GeometryField(srid=4326, null=True, blank=True)
+    minutes = models.IntegerField()
+    origin_lat = models.FloatField(null=True, blank=True)
+    origin_lng = models.FloatField(null=True, blank=True)
+    geom = models.PolygonField(srid=4326, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
-        managed = False
         db_table = 'iso_walk_rings'
+        indexes = [
+            models.Index(fields=['minutes']),
+        ]
+
+    def __str__(self):
+        return f"Walk {self.minutes}min"
 
 
 class IsoBikeRings(models.Model):
     """
-    Cycling isochrone rings.
+    Cycling isochrone rings - precomputed and stored.
     """
-    band = models.CharField(max_length=50, null=True, blank=True)
-    geom = models.GeometryField(srid=4326, null=True, blank=True)
+    minutes = models.IntegerField()
+    origin_lat = models.FloatField(null=True, blank=True)
+    origin_lng = models.FloatField(null=True, blank=True)
+    geom = models.PolygonField(srid=4326, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
-        managed = False
         db_table = 'iso_bike_rings'
+        indexes = [
+            models.Index(fields=['minutes']),
+        ]
+
+    def __str__(self):
+        return f"Bike {self.minutes}min"
 
 
-class IsoCarRingsOsm(models.Model):
+class IsoCarRings(models.Model):
     """
-    Car isochrone rings from OSM.
+    Car isochrone rings - precomputed and stored.
     """
-    band = models.CharField(max_length=50, primary_key=True)
-    geom = models.MultiPolygonField(srid=4326, null=True, blank=True)
+    minutes = models.IntegerField()
+    origin_lat = models.FloatField(null=True, blank=True)
+    origin_lng = models.FloatField(null=True, blank=True)
+    geom = models.PolygonField(srid=4326, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
-        managed = False
-        db_table = 'iso_car_rings_osm'
+        db_table = 'iso_car_rings'
+        indexes = [
+            models.Index(fields=['minutes']),
+        ]
+
+    def __str__(self):
+        return f"Car {self.minutes}min"
 
 
 class AcessibilidadeORSWalking(models.Model):

@@ -2,7 +2,7 @@ from rest_framework import serializers
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
 from .models import (
     RedeViariaV3, RedeViariaAvVerticesPgr, PoisAveiro,
-    IsoWalkRings, IsoBikeRings, IsoCarRingsOsm,
+    IsoWalkRings, IsoBikeRings, IsoCarRings,
     AcessibilidadeORSWalking, AcessibilidadeORSBike, AcessibilidadeORSCar
 )
 
@@ -52,11 +52,11 @@ class IsoBikeRingsSerializer(GeoFeatureModelSerializer):
         fields = '__all__'
 
 
-class IsoCarRingsOsmSerializer(GeoFeatureModelSerializer):
+class IsoCarRingsSerializer(GeoFeatureModelSerializer):
     """Serializer for car isochrones."""
     
     class Meta:
-        model = IsoCarRingsOsm
+        model = IsoCarRings
         geo_field = 'geom'
         fields = '__all__'
 

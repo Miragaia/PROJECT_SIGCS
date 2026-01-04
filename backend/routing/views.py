@@ -11,12 +11,12 @@ import json
 import os
 from .models import (
     RedeViariaV3, RedeViariaAvVerticesPgr, PoisAveiro,
-    IsoWalkRings, IsoBikeRings, IsoCarRingsOsm,
+    IsoWalkRings, IsoBikeRings, IsoCarRings,
     AcessibilidadeORSWalking, AcessibilidadeORSBike, AcessibilidadeORSCar
 )
 from .serializers import (
     RedeViariaV3Serializer, PoisAveiroSerializer,
-    IsoWalkRingsSerializer, IsoBikeRingsSerializer, IsoCarRingsOsmSerializer,
+    IsoWalkRingsSerializer, IsoBikeRingsSerializer, IsoCarRingsSerializer,
     RouteRequestSerializer, IsochroneRequestSerializer
 )
 
@@ -69,10 +69,10 @@ class IsoBikeRingsViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = IsoBikeRingsSerializer
 
 
-class IsoCarRingsOsmViewSet(viewsets.ReadOnlyModelViewSet):
+class IsoCarRingsViewSet(viewsets.ReadOnlyModelViewSet):
     """API endpoint for car isochrones."""
-    queryset = IsoCarRingsOsm.objects.all()
-    serializer_class = IsoCarRingsOsmSerializer
+    queryset = IsoCarRings.objects.all()
+    serializer_class = IsoCarRingsSerializer
 
 
 @api_view(['POST'])
