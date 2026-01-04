@@ -26,23 +26,81 @@ export default function RouteLayer({ route, origin, destination }) {
         const coords = feature.geometry.coordinates;
         const seq = feature.properties?.seq;
         
-        console.log(`  Feature ${idx} (seq=${seq}): ${geomType}`, coords);
-        
         if (geomType === 'LineString' && coords && coords.length > 0) {
           // LineString: array of [lng, lat] points
-          console.log(`    -> Adding ${coords.length} coordinates from LineString`);
-          allCoords.push(...coords);
+          let segmentCoords = [...coords];
+          
+          // Check if this segment should be reversed to connect with previous segments
+          if (allCoords.length > 0) {
+            const lastCoord = allCoords[allCoords.length - 1];
+            const firstCoordOfSegment = segmentCoords[0];
+            const lastCoordOfSegment = segmentCoords[segmentCoords.length - 1];
+            
+            // Calculate distances to determine if segment needs reversing
+            const distToFirst = Math.hypot(
+              lastCoord[0] - firstCoordOfSegment[0],
+              lastCoord[1] - firstCoordOfSegment[1]
+            );
+            const distToLast = Math.hypot(
+              lastCoord[0] - lastCoordOfSegment[0],
+              lastCoord[1] - lastCoordOfSegment[1]
+            );
+            
+            // If closer to last point, reverse the segment
+            if (distToLast < distToFirst) {
+              segmentCoords = segmentCoords.reverse();
+              console.log(`    -> Reversed segment ${seq} to maintain continuity`);
+            }
+          }
+          
+          // Remove duplicate first point if it matches the last point of previous segment
+          if (allCoords.length > 0) {
+            const lastCoord = allCoords[allCoords.length - 1];
+            if (segmentCoords[0][0] === lastCoord[0] && segmentCoords[0][1] === lastCoord[1]) {
+              segmentCoords = segmentCoords.slice(1);
+              console.log(`    -> Removed duplicate point at junction for segment ${seq}`);
+            }
+          }
+          
+          allCoords.push(...segmentCoords);
+          console.log(`    -> Added ${segmentCoords.length} coordinates (seq=${seq})`);
         } else if (geomType === 'MultiLineString' && coords) {
           // MultiLineString: array of arrays of [lng, lat] points
-          let totalCoords = 0;
-          coords.forEach(lineString => {
+          coords.forEach((lineString, lineIdx) => {
             if (lineString && lineString.length > 0) {
-              console.log(`    -> Adding ${lineString.length} coordinates from sub-LineString`);
-              allCoords.push(...lineString);
-              totalCoords += lineString.length;
+              let segmentCoords = [...lineString];
+              
+              // Check if this segment should be reversed
+              if (allCoords.length > 0) {
+                const lastCoord = allCoords[allCoords.length - 1];
+                const firstCoordOfSegment = segmentCoords[0];
+                const lastCoordOfSegment = segmentCoords[segmentCoords.length - 1];
+                
+                const distToFirst = Math.hypot(
+                  lastCoord[0] - firstCoordOfSegment[0],
+                  lastCoord[1] - firstCoordOfSegment[1]
+                );
+                const distToLast = Math.hypot(
+                  lastCoord[0] - lastCoordOfSegment[0],
+                  lastCoord[1] - lastCoordOfSegment[1]
+                );
+                
+                if (distToLast < distToFirst) {
+                  segmentCoords = segmentCoords.reverse();
+                }
+              }
+              
+              // Remove duplicate first point
+              if (allCoords.length > 0) {
+                const lastCoord = allCoords[allCoords.length - 1];
+                if (segmentCoords[0][0] === lastCoord[0] && segmentCoords[0][1] === lastCoord[1]) {
+                  segmentCoords = segmentCoords.slice(1);
+                }
+              }
+              
+              allCoords.push(...segmentCoords);
             }
           });
-          console.log(`    -> Total: ${totalCoords} coordinates`);
         }
       }
     });
@@ -50,10 +108,9 @@ export default function RouteLayer({ route, origin, destination }) {
   
   // Convert GeoJSON coordinates [lng, lat] to Leaflet [lat, lng]
   const pathCoords = allCoords.map(coord => [coord[1], coord[0]]);
-  console.log('RouteLayer: allCoords before conversion:', allCoords);
-  console.log('RouteLayer: Total path coordinates after conversion:', pathCoords.length);
+  console.log('RouteLayer: Total coordinates:', pathCoords.length);
   if (pathCoords.length > 0) {
-    console.log('RouteLayer: First coord (should be [lat, lng]):', pathCoords[0], 'Last coord:', pathCoords[pathCoords.length - 1]);
+    console.log('RouteLayer: Route from', pathCoords[0], 'to', pathCoords[pathCoords.length - 1]);
   }
 
   return (
