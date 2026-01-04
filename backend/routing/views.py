@@ -111,42 +111,50 @@ def calculate_route(request):
     
     try:
         with connection.cursor() as cursor:
-            # Find nearest EDGE (road segment) for origin, considering transport mode
-            # Get both source and target vertices to try both ends of the road
+            # Find nearest EDGE and project clicked point onto it
+            # This ensures we snap to the actual road, not just a distant vertex
             cursor.execute(f"""
-                SELECT source, target, 
-                       ST_Distance(ST_Transform(geom, 4326), ST_SetSRID(ST_MakePoint(%s, %s), 4326)) as dist
+                SELECT 
+                    source, target,
+                    ST_AsGeoJSON(ST_Transform(ST_ClosestPoint(geom, ST_Transform(ST_SetSRID(ST_MakePoint(%s, %s), 4326), 3763)), 4326)) as projected_point
                 FROM rede_viaria_v3
                 WHERE {cost_field} IS NOT NULL
                 ORDER BY ST_Transform(geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
                 LIMIT 1
             """, [origin_lng, origin_lat, origin_lng, origin_lat])
-            origin_edge = cursor.fetchone()
-            if not origin_edge:
+            origin_result = cursor.fetchone()
+            if not origin_result:
                 return Response({
                     'error': 'No valid road found near origin point',
                     'message': f'Could not find a {mode}-accessible road near the starting point.'
                 }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
             
-            origin_source, origin_target = origin_edge[0], origin_edge[1]
+            origin_source, origin_target, origin_projected_geom = origin_result
+            origin_projected = eval(origin_projected_geom) if origin_projected_geom else None
+            origin_projected_lat = origin_projected['coordinates'][1]
+            origin_projected_lng = origin_projected['coordinates'][0]
             
-            # Find nearest EDGE for destination
+            # Find nearest EDGE for destination and project point onto it
             cursor.execute(f"""
-                SELECT source, target,
-                       ST_Distance(ST_Transform(geom, 4326), ST_SetSRID(ST_MakePoint(%s, %s), 4326)) as dist
+                SELECT 
+                    source, target,
+                    ST_AsGeoJSON(ST_Transform(ST_ClosestPoint(geom, ST_Transform(ST_SetSRID(ST_MakePoint(%s, %s), 4326), 3763)), 4326)) as projected_point
                 FROM rede_viaria_v3
                 WHERE {cost_field} IS NOT NULL
                 ORDER BY ST_Transform(geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
                 LIMIT 1
             """, [dest_lng, dest_lat, dest_lng, dest_lat])
-            dest_edge = cursor.fetchone()
-            if not dest_edge:
+            dest_result = cursor.fetchone()
+            if not dest_result:
                 return Response({
                     'error': 'No valid road found near destination point',
                     'message': f'Could not find a {mode}-accessible road near the destination.'
                 }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
             
-            dest_source, dest_target = dest_edge[0], dest_edge[1]
+            dest_source, dest_target, dest_projected_geom = dest_result
+            dest_projected = eval(dest_projected_geom) if dest_projected_geom else None
+            dest_projected_lat = dest_projected['coordinates'][1]
+            dest_projected_lng = dest_projected['coordinates'][0]
             
             # Try all combinations of source/target vertices to find a valid route
             # This handles cases where one end of the edge is better connected
@@ -218,9 +226,32 @@ def calculate_route(request):
                     'distance': round(total_distance_km, 2),  # in km
                     'duration': round(total_time_minutes, 1),  # in minutes
                     'origin': {'lat': origin_lat, 'lng': origin_lng},
-                    'destination': {'lat': dest_lat, 'lng': dest_lng}
+                    'origin_projected': {'lat': origin_projected_lat, 'lng': origin_projected_lng},
+                    'destination': {'lat': dest_lat, 'lng': dest_lng},
+                    'destination_projected': {'lat': dest_projected_lat, 'lng': dest_projected_lng}
                 }
             }
+            
+            # Add connector segment from clicked origin to projected origin
+            route_data['features'].append({
+                'type': 'Feature',
+                'properties': {
+                    'seq': 0,
+                    'node': None,
+                    'edge': None,
+                    'cost': 0,
+                    'name': 'Connection to road',
+                    'distance_km': 0,
+                    'type': 'connector'
+                },
+                'geometry': {
+                    'type': 'LineString',
+                    'coordinates': [
+                        [origin_lng, origin_lat],
+                        [origin_projected_lng, origin_projected_lat]
+                    ]
+                }
+            })
             
             for route in routes_found:
                 if route[5]:  # geometry
@@ -236,6 +267,27 @@ def calculate_route(request):
                         },
                         'geometry': eval(route[5])  # Parse GeoJSON string
                     })
+            
+            # Add connector segment from projected destination to clicked destination
+            route_data['features'].append({
+                'type': 'Feature',
+                'properties': {
+                    'seq': 999,
+                    'node': None,
+                    'edge': None,
+                    'cost': 0,
+                    'name': 'Connection from road',
+                    'distance_km': 0,
+                    'type': 'connector'
+                },
+                'geometry': {
+                    'type': 'LineString',
+                    'coordinates': [
+                        [dest_projected_lng, dest_projected_lat],
+                        [dest_lng, dest_lat]
+                    ]
+                }
+            })
             
             return Response(route_data)
     
