@@ -310,6 +310,12 @@ function App() {
         destination={destination}
         onOriginChange={setOrigin}
         onDestinationChange={setDestination}
+        onClearRoute={() => {
+          setOrigin(null);
+          setDestination(null);
+          setRoute(null);
+          setRouteStats(null);
+        }}
         onCalculateRoute={calculateRoute}
         isLoading={loadingRoute}
         routeDistance={routeStats?.distance}

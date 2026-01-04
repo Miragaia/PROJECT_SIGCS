@@ -6,6 +6,7 @@ export default function RouteControls({
   destination,
   onOriginChange,
   onDestinationChange,
+  onClearRoute,
   onCalculateRoute,
   isLoading,
   routeDistance,
@@ -15,8 +16,7 @@ export default function RouteControls({
   const [showDestInput, setShowDestInput] = useState(false);
 
   const clearRoute = () => {
-    onOriginChange(null);
-    onDestinationChange(null);
+    onClearRoute();
   };
 
   return (
