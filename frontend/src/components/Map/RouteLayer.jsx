@@ -25,6 +25,13 @@ export default function RouteLayer({ route, origin, destination }) {
         const geomType = feature.geometry.type;
         const coords = feature.geometry.coordinates;
         const seq = feature.properties?.seq;
+        const isConnector = feature.properties?.type === 'connector';
+        
+        // Skip connector segments - we'll add clicked points directly instead
+        if (isConnector) {
+          console.log(`    -> Skipping connector segment (seq=${seq})`);
+          return;
+        }
         
         if (geomType === 'LineString' && coords && coords.length > 0) {
           // LineString: array of [lng, lat] points
@@ -105,9 +112,38 @@ export default function RouteLayer({ route, origin, destination }) {
       }
     });
   }
+
+  // Adjust start/end of the network path to use the projected points (not the far vertex)
+  if (route && route.properties && allCoords.length > 0) {
+    const projOrigin = route.properties.origin_projected;
+    const projDest = route.properties.destination_projected;
+
+    if (projOrigin) {
+      // Replace the first network coordinate with the projected point on the edge
+      allCoords[0] = [projOrigin.lng, projOrigin.lat];
+    }
+
+    if (projDest) {
+      // Replace the last network coordinate with the projected point on the edge
+      allCoords[allCoords.length - 1] = [projDest.lng, projDest.lat];
+    }
+  }
   
   // Convert GeoJSON coordinates [lng, lat] to Leaflet [lat, lng]
-  const pathCoords = allCoords.map(coord => [coord[1], coord[0]]);
+  let pathCoords = allCoords.map(coord => [coord[1], coord[0]]);
+  
+  // Prepend the clicked origin point (not the projected point)
+  if (route && route.properties && route.properties.origin && pathCoords.length > 0) {
+    const clickedOrigin = route.properties.origin;
+    pathCoords = [[clickedOrigin.lat, clickedOrigin.lng], ...pathCoords];
+  }
+  
+  // Append the clicked destination point (not the projected point)
+  if (route && route.properties && route.properties.destination && pathCoords.length > 0) {
+    const clickedDestination = route.properties.destination;
+    pathCoords = [...pathCoords, [clickedDestination.lat, clickedDestination.lng]];
+  }
+  
   console.log('RouteLayer: Total coordinates:', pathCoords.length);
   if (pathCoords.length > 0) {
     console.log('RouteLayer: Route from', pathCoords[0], 'to', pathCoords[pathCoords.length - 1]);
