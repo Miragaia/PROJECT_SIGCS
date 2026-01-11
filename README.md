@@ -774,6 +774,8 @@ For questions, issues, or contributions, please contact the development team or 
 - ✅ Automatic network selection: v3_plus for walk/bike, v3 for car
 - ✅ **Routing Fix**: Resolved NULL id filtering in pgr_dijkstra subqueries for walk/bike/car modes
 - ✅ Walk/bike/car routing fully operational with feature geometry and travel time metrics
+- ✅ **Isochrone Fix**: Added missing base_speed_kmh definitions in isochrone generation (walk: 6 km/h, bike: 15 km/h, car: 40 km/h)
+- ✅ Real-time isochrone generation fully functional for all three transport modes
 - ✅ Backward compatible API - no frontend changes required
 
 ### Version 2.0 (January 2026)
