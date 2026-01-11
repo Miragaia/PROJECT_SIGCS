@@ -400,9 +400,11 @@ def generate_isochrone(request):
     if mode in ['walk', 'bike']:
         network_table = 'rede_viaria_v3_plus'
         geom_column = 'geom_2d'  # Use normalized 2D geometry
+        base_speed_kmh = 6 if mode == 'walk' else 15
     else:
         network_table = 'rede_viaria_v3'
         geom_column = 'geom'
+        base_speed_kmh = 40
     
     try:
         isochrones = []

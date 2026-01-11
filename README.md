@@ -763,7 +763,7 @@ For questions, issues, or contributions, please contact the development team or 
 
 ## Changelog
 
-### Version 2.1 (January 2026 - Network Enhancement)
+### Version 2.1 (January 2026 - Network Enhancement & Routing Fixes)
 - ✅ **Critical Fix**: Enhanced walk/bike networks with missing OSM paths
 - ✅ Created `rede_viaria_v3_plus` with complete pedestrian/cycling infrastructure
 - ✅ Added `geom_2d` normalized geometry column for pgRouting compatibility
@@ -772,6 +772,8 @@ For questions, issues, or contributions, please contact the development team or 
 - ✅ Regenerated walk/bike isochrones with 50-200% coverage increase
 - ✅ Updated Django models, serializers, and views for dual-network support
 - ✅ Automatic network selection: v3_plus for walk/bike, v3 for car
+- ✅ **Routing Fix**: Resolved NULL id filtering in pgr_dijkstra subqueries for walk/bike/car modes
+- ✅ Walk/bike/car routing fully operational with feature geometry and travel time metrics
 - ✅ Backward compatible API - no frontend changes required
 
 ### Version 2.0 (January 2026)
