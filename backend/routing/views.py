@@ -10,13 +10,15 @@ import csv
 import json
 import os
 from .models import (
-    RedeViariaV3, RedeViariaAvVerticesPgr, PoisAveiro,
+    RedeViariaV3, RedeViariaV3Plus, RedeViariaAvVerticesPgr, PoisAveiro,
     IsoWalkRings, IsoBikeRings, IsoCarRings,
+    IsoWalkRingsV3Plus, IsoBikeRingsV3Plus,
     AcessibilidadeORSWalking, AcessibilidadeORSBike, AcessibilidadeORSCar
 )
 from .serializers import (
     RedeViariaV3Serializer, PoisAveiroSerializer,
     IsoWalkRingsSerializer, IsoBikeRingsSerializer, IsoCarRingsSerializer,
+    IsoWalkRingsV3PlusSerializer, IsoBikeRingsV3PlusSerializer,
     RouteRequestSerializer, IsochroneRequestSerializer
 )
 
@@ -58,19 +60,19 @@ class PoisAveiroViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class IsoWalkRingsViewSet(viewsets.ReadOnlyModelViewSet):
-    """API endpoint for walking isochrones."""
-    queryset = IsoWalkRings.objects.all()
-    serializer_class = IsoWalkRingsSerializer
+    """API endpoint for walking isochrones (v3_plus - current)."""
+    queryset = IsoWalkRingsV3Plus.objects.all()
+    serializer_class = IsoWalkRingsV3PlusSerializer
 
 
 class IsoBikeRingsViewSet(viewsets.ReadOnlyModelViewSet):
-    """API endpoint for cycling isochrones."""
-    queryset = IsoBikeRings.objects.all()
-    serializer_class = IsoBikeRingsSerializer
+    """API endpoint for cycling isochrones (v3_plus - current)."""
+    queryset = IsoBikeRingsV3Plus.objects.all()
+    serializer_class = IsoBikeRingsV3PlusSerializer
 
 
 class IsoCarRingsViewSet(viewsets.ReadOnlyModelViewSet):
-    """API endpoint for car isochrones."""
+    """API endpoint for car isochrones (original v3)."""
     queryset = IsoCarRings.objects.all()
     serializer_class = IsoCarRingsSerializer
 
@@ -109,6 +111,18 @@ def calculate_route(request):
     }
     cost_field = cost_mapping.get(mode, 'cost')
     
+    # Choose the correct table based on mode
+    # Walk/Bike use v3_plus (complete pedestrian/cycling network)
+    # Car uses original v3 (validated car network)
+    if mode in ['walk', 'bike']:
+        network_table = 'rede_viaria_v3_plus'
+        geom_column = 'geom_2d'  # Use normalized 2D geometry
+        base_speed_kmh = 6 if mode == 'walk' else 15
+    else:
+        network_table = 'rede_viaria_v3'
+        geom_column = 'geom'
+        base_speed_kmh = 40
+    
     try:
         with connection.cursor() as cursor:
             # Find nearest EDGE and project clicked point onto it
@@ -116,10 +130,9 @@ def calculate_route(request):
             cursor.execute(f"""
                 SELECT 
                     source, target,
-                    ST_AsGeoJSON(ST_Transform(ST_ClosestPoint(geom, ST_Transform(ST_SetSRID(ST_MakePoint(%s, %s), 4326), 3763)), 4326)) as projected_point
-                FROM rede_viaria_v3
-                WHERE {cost_field} IS NOT NULL
-                ORDER BY ST_Transform(geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                    ST_AsGeoJSON(ST_Transform(ST_ClosestPoint({geom_column}, ST_Transform(ST_SetSRID(ST_MakePoint(%s, %s), 4326), 3763)), 4326)) as projected_point
+                FROM {network_table}
+                ORDER BY ST_Transform({geom_column}, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
                 LIMIT 1
             """, [origin_lng, origin_lat, origin_lng, origin_lat])
             origin_result = cursor.fetchone()
@@ -138,10 +151,9 @@ def calculate_route(request):
             cursor.execute(f"""
                 SELECT 
                     source, target,
-                    ST_AsGeoJSON(ST_Transform(ST_ClosestPoint(geom, ST_Transform(ST_SetSRID(ST_MakePoint(%s, %s), 4326), 3763)), 4326)) as projected_point
-                FROM rede_viaria_v3
-                WHERE {cost_field} IS NOT NULL
-                ORDER BY ST_Transform(geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                    ST_AsGeoJSON(ST_Transform(ST_ClosestPoint({geom_column}, ST_Transform(ST_SetSRID(ST_MakePoint(%s, %s), 4326), 3763)), 4326)) as projected_point
+                FROM {network_table}
+                ORDER BY ST_Transform({geom_column}, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
                 LIMIT 1
             """, [dest_lng, dest_lat, dest_lng, dest_lat])
             dest_result = cursor.fetchone()
@@ -160,11 +172,9 @@ def calculate_route(request):
             # This handles cases where one end of the edge is better connected
             routes_found = None
             best_vertices = None
-            
+
             for origin_vertex in [origin_source, origin_target]:
                 for dest_vertex in [dest_source, dest_target]:
-                    # Calculate route using pgr_dijkstra, filtering by transport mode
-                    # Only include edges where the cost column is NOT NULL (road allows this mode)
                     cursor.execute(f"""
                         SELECT 
                             r.seq,
@@ -172,29 +182,83 @@ def calculate_route(request):
                             r.edge,
                             r.cost,
                             rv.osm_name,
-                            ST_AsGeoJSON(ST_Transform(rv.geom, 4326)) as geometry,
-                            rv.km
+                            ST_AsGeoJSON(ST_Transform(rv.{geom_column}, 4326)) as geometry,
+                            ST_Length(ST_Transform(rv.{geom_column}, 4326)::geography) / 1000.0 as dist_km
                         FROM pgr_dijkstra(
-                            'SELECT id_0 as id, source, target, 
-                                    {cost_field} as cost, 
-                                    {cost_field} as reverse_cost 
-                             FROM rede_viaria_v3 
-                             WHERE {cost_field} IS NOT NULL',
-                            %s, %s, directed := false
+                                $$ SELECT id_0::bigint as id, source::bigint, target::bigint,
+                                      COALESCE({cost_field}::float8, (km::float8 / {base_speed_kmh} * 60.0)) as cost,
+                                      COALESCE({cost_field}::float8, (km::float8 / {base_speed_kmh} * 60.0)) as reverse_cost
+                                  FROM {network_table}
+                                  WHERE id_0 IS NOT NULL AND source IS NOT NULL AND target IS NOT NULL $$::text,
+                            %s::bigint, %s::bigint, false
                         ) r
-                        LEFT JOIN rede_viaria_v3 rv ON r.edge = rv.id_0
+                        LEFT JOIN {network_table} rv ON r.edge = rv.id_0
                         WHERE r.edge IS NOT NULL
                     """, [origin_vertex, dest_vertex])
-                    
+
                     temp_routes = cursor.fetchall()
-                    
+
                     if temp_routes:
                         routes_found = temp_routes
                         best_vertices = (origin_vertex, dest_vertex)
                         break
-                
+
                 if routes_found:
                     break
+
+            # Fallback: use nearest graph vertices instead of edge endpoints (helps when endpoints are in cul-de-sacs)
+            if not routes_found:
+                try:
+                    vertices_table = 'rede_viaria_v3_plus_vertices_pgr' if mode in ['walk', 'bike'] else 'rede_viaria_av_vertices_pgr'
+                    # Nearest vertex to projected origin
+                    cursor.execute(f"""
+                        SELECT id
+                        FROM {vertices_table}
+                        ORDER BY ST_Transform(the_geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                        LIMIT 1
+                    """, [origin_projected_lng, origin_projected_lat])
+                    near_origin_row = cursor.fetchone()
+
+                    # Nearest vertex to projected destination
+                    cursor.execute(f"""
+                        SELECT id
+                        FROM {vertices_table}
+                        ORDER BY ST_Transform(the_geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                        LIMIT 1
+                    """, [dest_projected_lng, dest_projected_lat])
+                    near_dest_row = cursor.fetchone()
+
+                    if near_origin_row and near_dest_row:
+                        near_origin = near_origin_row[0]
+                        near_dest = near_dest_row[0]
+
+                        cursor.execute(f"""
+                            SELECT 
+                                r.seq,
+                                r.node,
+                                r.edge,
+                                r.cost,
+                                rv.osm_name,
+                                ST_AsGeoJSON(ST_Transform(rv.{geom_column}, 4326)) as geometry,
+                                ST_Length(ST_Transform(rv.{geom_column}, 4326)::geography) / 1000.0 as dist_km
+                            FROM pgr_dijkstra(
+                                                        $$ SELECT id_0::bigint as id, source::bigint, target::bigint,
+                                                                            COALESCE({cost_field}::float8, (km::float8 / {base_speed_kmh} * 60.0)) as cost,
+                                                                            COALESCE({cost_field}::float8, (km::float8 / {base_speed_kmh} * 60.0)) as reverse_cost
+                                                                        FROM {network_table}
+                                                                        WHERE id_0 IS NOT NULL AND source IS NOT NULL AND target IS NOT NULL $$::text,
+                                %s::bigint, %s::bigint, false
+                            ) r
+                            LEFT JOIN {network_table} rv ON r.edge = rv.id_0
+                            WHERE r.edge IS NOT NULL
+                        """, [near_origin, near_dest])
+
+                        temp_routes = cursor.fetchall()
+                        if temp_routes:
+                            routes_found = temp_routes
+                            best_vertices = (near_origin, near_dest)
+                except Exception as _:
+                    pass
             
             if not routes_found:
                 return Response({
@@ -330,19 +394,29 @@ def generate_isochrone(request):
     if not cost_field:
         return Response({'error': 'Invalid mode'}, status=status.HTTP_400_BAD_REQUEST)
     
+    # Choose the correct table based on mode
+    # Walk/Bike use v3_plus (complete pedestrian/cycling network)
+    # Car uses original v3 (validated car network)
+    if mode in ['walk', 'bike']:
+        network_table = 'rede_viaria_v3_plus'
+        geom_column = 'geom_2d'  # Use normalized 2D geometry
+    else:
+        network_table = 'rede_viaria_v3'
+        geom_column = 'geom'
+    
     try:
         isochrones = []
-        print(f"[ISOCHRONE DEBUG] Generating isochrones for origin ({origin_lat}, {origin_lng}) mode={mode} minutes={minutes_list}")
+        print(f"[ISOCHRONE DEBUG] Generating isochrones for origin ({origin_lat}, {origin_lng}) mode={mode} minutes={minutes_list} table={network_table}")
 
         with connection.cursor() as cursor:
             # Snap origin to nearest edge and pick the closest endpoint as start vertex
             cursor.execute(f"""
                 SELECT 
                     source, target,
-                    ST_AsGeoJSON(ST_Transform(ST_ClosestPoint(geom, ST_Transform(ST_SetSRID(ST_MakePoint(%s, %s), 4326), 3763)), 4326)) as projected_point
-                FROM rede_viaria_v3
+                    ST_AsGeoJSON(ST_Transform(ST_ClosestPoint({geom_column}, ST_Transform(ST_SetSRID(ST_MakePoint(%s, %s), 4326), 3763)), 4326)) as projected_point
+                FROM {network_table}
                 WHERE {cost_field} IS NOT NULL
-                ORDER BY ST_Transform(geom, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                ORDER BY ST_Transform({geom_column}, 4326) <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
                 LIMIT 1
             """, [origin_lng, origin_lat, origin_lng, origin_lat])
 
@@ -371,12 +445,16 @@ def generate_isochrone(request):
                     WITH dd AS (
                         SELECT edge
                         FROM pgr_drivingDistance(
-                            'SELECT id_0 as id, source, target, {cost_field} as cost, {cost_field} as reverse_cost FROM rede_viaria_v3 WHERE {cost_field} IS NOT NULL',
-                            %s, %s, false
+                                $$ SELECT id_0::bigint as id, source::bigint, target::bigint,
+                                      COALESCE({cost_field}::float8, (km::float8 / {base_speed_kmh} * 60.0)) as cost,
+                                      COALESCE({cost_field}::float8, (km::float8 / {base_speed_kmh} * 60.0)) as reverse_cost
+                                  FROM {network_table}
+                                  WHERE id_0 IS NOT NULL AND source IS NOT NULL AND target IS NOT NULL $$::text,
+                            %s::bigint, %s::float8, false
                         )
                     ), geomset AS (
-                        SELECT ST_Collect(ST_Force2D(ST_Transform(rv.geom, 4326))) AS g, COUNT(*) AS cnt
-                        FROM rede_viaria_v3 rv
+                        SELECT ST_Collect(ST_Force2D(ST_Transform(rv.{geom_column}, 4326))) AS g, COUNT(*) AS cnt
+                        FROM {network_table} rv
                         WHERE rv.id_0 IN (SELECT edge FROM dd)
                     )
                     SELECT ST_AsGeoJSON(

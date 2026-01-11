@@ -1,8 +1,9 @@
 from rest_framework import serializers
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
 from .models import (
-    RedeViariaV3, RedeViariaAvVerticesPgr, PoisAveiro,
+    RedeViariaV3, RedeViariaV3Plus, RedeViariaAvVerticesPgr, PoisAveiro,
     IsoWalkRings, IsoBikeRings, IsoCarRings,
+    IsoWalkRingsV3Plus, IsoBikeRingsV3Plus,
     AcessibilidadeORSWalking, AcessibilidadeORSBike, AcessibilidadeORSCar
 )
 
@@ -35,7 +36,7 @@ class PoisAveiroSerializer(GeoFeatureModelSerializer):
 
 
 class IsoWalkRingsSerializer(GeoFeatureModelSerializer):
-    """Serializer for walking isochrones."""
+    """Serializer for walking isochrones (original v3 - deprecated)."""
     
     class Meta:
         model = IsoWalkRings
@@ -44,7 +45,7 @@ class IsoWalkRingsSerializer(GeoFeatureModelSerializer):
 
 
 class IsoBikeRingsSerializer(GeoFeatureModelSerializer):
-    """Serializer for cycling isochrones."""
+    """Serializer for cycling isochrones (original v3 - deprecated)."""
     
     class Meta:
         model = IsoBikeRings
@@ -57,6 +58,24 @@ class IsoCarRingsSerializer(GeoFeatureModelSerializer):
     
     class Meta:
         model = IsoCarRings
+        geo_field = 'geom'
+        fields = '__all__'
+
+
+class IsoWalkRingsV3PlusSerializer(GeoFeatureModelSerializer):
+    """Serializer for walking isochrones (v3_plus - current)."""
+    
+    class Meta:
+        model = IsoWalkRingsV3Plus
+        geo_field = 'geom'
+        fields = '__all__'
+
+
+class IsoBikeRingsV3PlusSerializer(GeoFeatureModelSerializer):
+    """Serializer for cycling isochrones (v3_plus - current)."""
+    
+    class Meta:
+        model = IsoBikeRingsV3Plus
         geo_field = 'geom'
         fields = '__all__'
 
